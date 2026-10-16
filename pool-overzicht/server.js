@@ -386,7 +386,7 @@ http.createServer(async (req, res) => {
     const d = await cached();
     if (url.pathname.startsWith('/api')) {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify(d, (k, v) => (k === 'alle' || k === 'vol' ? undefined : v)));
+      return res.end(JSON.stringify(d, (k, v) => (['alle', 'vol', 'ltcVol', 'pepVol'].includes(k) ? undefined : v)));
     }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(page(d));
