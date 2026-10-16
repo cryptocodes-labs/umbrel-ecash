@@ -10,8 +10,8 @@ Lees dit vóór je iets aan de pools, de Umbrel of de VPS verandert.
 | 3338 | → :3338 | BTC solo **rental** — losse container `btc-rental` (mindiff 500k, startdiff 1M) | 1% → zelfde BTC-adres | ja |
 | 3334 | → :3335 | BCH solo — LoneStrike Cash (asicseer-pool `-B`) | 1% → bitcoincash:qppus6ldc7esd8x4lfq6yk98metwm6mg6czuhu4k8p | ja |
 | 3337 | → :3337 | BCH solo **rental** — losse container `bch-rental` (mindiff 500k, startdiff 1M) | 1% → zelfde BCH-adres | ja |
-| 3335 | → :22559 | DOGE+LTC **publiek** — losse container `doge-public` (image cryptocode/doge-public:1.7.0, PUBLIC_MERGED=1), username `LTC.DOGE[.rig]` | 1% op LTC → LdAEjW… en 1% op DOGE → DFabbT3… | ja (live 26 sep) |
-| 3339 | → :22562 | DOGE+LTC **publiek rental** — losse container `doge-public-rental` (zelfde image, START_DIFFICULTY 1048576, MIN 65536), username `LTC.DOGE[.rig]` | 1% op LTC en DOGE | ja (live 26 sep) |
+| 3335 | → :22559 | DOGE+LTC(+PEP) **publiek** — losse container `doge-public` (image cryptocode/doge-public:1.8.0 sinds 16 okt, PUBLIC_MERGED=1), username `LTC.DOGE[.PEP][.rig]` | 1% op LTC → LdAEjW…, DOGE → DFabbT3…, PEP → Pfe2U3… | ja (live 26 sep, PEP 16 okt) |
+| 3339 | → :22562 | DOGE+LTC(+PEP) **publiek rental** — losse container `doge-public-rental` (zelfde image, START_DIFFICULTY 1048576, MIN 65536), username `LTC.DOGE[.PEP][.rig]` | 1% op LTC, DOGE en PEP | ja (live 26 sep, PEP 16 okt) |
 | 3336 | → :22558 | DOGE+LTC rental (umbrel-dogecoin 1.6.1, LOCK_PAYOUT_ADDRESS=1) | – | alleen tijdens eigen huurorder |
 | niet doorgestuurd | :22557 | DOGE+LTC thuispoort (app 1.6.1), gelockt op eigen adressen | – | nee |
 | niet doorgestuurd | :33333 | LoneStrike SV2 — betaalt altijd één vast adres | – | nooit openbaar |
@@ -78,13 +78,16 @@ Een update van **Bassin**, **LoneStrike** of **Bitcoin Cash Node** in de Umbrel 
 - De ckpool-logboeken van Bassin en btc-rental zijn op 16 okt leeggemaakt (samen 18,8 GB spam); nuttige regels staan in `ckpool-tot-2026-10-16.log` ernaast.
 - In de Umbrel zit een ongebruikte interne NVMe van 512 GB (`nvme0n1`, geen partities).
 
-## PEP (Pepecoin) — klaar, nog niet live
+## PEP (Pepecoin) — live op de pools sinds 16 oktober 2026
 
-- Pepecoin wordt als tweede extra munt naast DOGE onder dezelfde LTC-hashes gemined (chain merkle tree: DOGE 98 op plek 0, PEP 63 op plek 1). Zonder PEP-instellingen is alles byte-identiek aan 1.7.0.
-- Aanzetten: in `~/umbrel/app-data/doge-dogecoin-solo/.env` `PEP_RPC_HOST=doge-pepecoin-node_pepecoind_1`, `PEP_RPC_PASSWORD=…` (dashboard van de Pepecoin Node) en `PEP_PAYOUT_ADDRESS=P…` (eigen Pepecoin Core-wallet, geen beursadres: coinbase-uitbetalingen worden door beurzen niet altijd verwerkt; rijp na 240 blokken). Daarna Solo-app herstarten en `doge-public` opnieuw uitrollen.
-- Openbare poort: gebruikersnaam `LTC.DOGE[.PEP][.rig]`; met PEP-adres 99% van het eigen PEP-blok voor de miner, 1% voor ons. Een verkeerd getypt PEP-adres wordt geweigerd.
+- Pepecoin wordt als tweede extra munt naast DOGE onder dezelfde LTC-hashes gemined (chain merkle tree: DOGE 98 op plek 0, PEP 63 op plek 1). Zonder PEP-adres in de gebruikersnaam is het werk byte-identiek aan 1.7.0.
+- **Feeadres (1%) en privépool:** `Pfe2U3n5GYXJd9TMAKNCGVhhSDyj35yjvj`, in de wallet van de Pepecoin Node zelf. Die wallet staat aan via de Umbrel-instelling `DISABLE_WALLET=0` (service pepecoind; blijft bij updates) en is versleuteld met een wachtwoord dat alleen de eigenaar heeft. `wallet.dat` zit in de uurlijkse back-up op de DigiEra. Uitbetalingen uit een blok zijn pas na 240 blokken uit te geven. Versturen (bijv. naar Kraken, dat PEP sinds 11-02-2026 heeft) doet de eigenaar zelf, in één keer boven Kraken's minimum: het feeadres zelf is bewust geen beursadres (100 PEP per blok kan onder het stortingsminimum vallen en gaat dan verloren).
+- **Privépool** (Solo-app, 22557 en 22558): PEP_* in `~/umbrel/app-data/doge-dogecoin-solo/.env` sinds 16 okt 19:25 NL; elk PEP-blok gaat naar het feeadres.
+- **Publiek 3335 en rental 3339**: 16 okt 19:31 NL opnieuw gestart op 1.8.0 met `~/pools-pep-uitrol.sh` (neemt de PEP_*-regels uit de privépool over en de containeropties uit `docker inspect`; valt bij een mislukte start zelf terug op 1.7.0). Kopieën: `~/doge-public*/env.voor-pep-*` en `inspect-voor-pep-*.json`.
+- **Controle 16 okt:** `check_pools.py` 6× OK (99/1); van buitenaf met testadressen: zonder PEP-adres draagt de commitment 1 keten, met PEP-adres 2, op beide poorten; een ongeldig PEP-adres wordt geweigerd. Eerste echte PEP-blok nog nameten op 99/1.
+- Gebruikersnaam: `LTC.DOGE[.PEP][.rig]`; met PEP-adres 99% van het eigen PEP-blok voor de miner, 1% voor ons. Eigen MRR-huur: zet het feeadres als derde deel in de MRR-gebruikersnaam om ook PEP te minen.
 - Pepecoin uit of onbereikbaar: valt binnen seconden uit de jobs, LTC en DOGE lopen door (bewezen in CI met een gestopte pepecoind).
-- Website: branch `feat/solo-pool-pep` in coin-bonus-finder (pagina, statskop, voorwaarden, 9 talen) pas mergen als PEP live is en 99/1 is nagemeten; de publieke stats-API moet dan een PEP-veld krijgen.
+- **Nog te doen:** PEP-veld in de publieke stats-API (pool-overzicht) en daarna website-branch `feat/solo-pool-pep` in coin-bonus-finder mergen (pagina, statskop, voorwaarden, 9 talen; datum in de voorwaarden = livegangsdatum).
 
 ## Bewaking (node-watchdog)
 
