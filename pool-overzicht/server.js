@@ -3,14 +3,15 @@
 // Pool-overzicht: één pagina met alle pools op de Umbrel.
 //
 // Leest alleen (read-only mounts en GET-verzoeken), verandert niets aan de pools.
-//   http://<umbrel>:22570/          de pagina, ververst elke 30 s
-//   http://<umbrel>:22570/api       dezelfde cijfers als JSON (basis voor de website)
+//   /          de pagina, ververst elke 30 s (alleen op het eigen netwerk)
+//   /api       dezelfde cijfers als JSON (alleen op het eigen netwerk)
+//   /public/*  totalen en één adres op verzoek (via de proxy, publiek)
 //
 // Bronnen:
 //   ckpool (Bassin, btc-rental):   <logdir>/pool/pool.status en <logdir>/users/<adres>
 //   asicseer (LoneStrike, bch-rental): de laatste "Pool:" en "User" regels in de log,
 //                                   of pool/pool.status als die er is
-//   umbrel-dogecoin (privé, publiek, publiek-rental): GET /api/status op de container
+//   LTC+DOGE-pools: GET /api/status op de container
 //
 const http = require('node:http');
 const fs = require('node:fs');
@@ -25,7 +26,8 @@ const POOLS = [
   { id: 'bch-rental', naam: 'BCH rental', poort: '3337', voor: 'huur', type: 'asicseer', dir: '/src/bch-rental' },
   { id: 'doge-public', naam: 'LTC+DOGE', poort: '3335', voor: 'eigen miners', type: 'doge', url: 'http://doge-public:3000/api/status' },
   { id: 'doge-rental', naam: 'LTC+DOGE rental', poort: '3339', voor: 'huur', type: 'doge', url: 'http://doge-public-rental:3000/api/status' },
-  { id: 'doge-private', naam: 'LTC+DOGE privé', poort: '3336 / thuis 22557', voor: 'alleen eigen', type: 'doge', url: process.env.DOGE_PRIVATE_URL || 'http://dogecoin-solo_app_1:3000/api/status' },
+  // Privé pool: alleen als DOGE_PRIVATE_URL is gezet (staat in install.sh), nooit publiek.
+  ...(process.env.DOGE_PRIVATE_URL ? [{ id: 'doge-private', naam: 'LTC+DOGE privé', poort: process.env.DOGE_PRIVATE_PORTS || '', voor: 'alleen eigen', type: 'doge', url: process.env.DOGE_PRIVATE_URL }] : []),
 ];
 
 // Zoekt <root>/**/pool/pool.status (max 4 diep) en geeft de logmap terug.
@@ -156,7 +158,9 @@ async function doge(p) {
     const lijst = (s.workers || []).map((w) => {
       const [naam, adres] = String(w.worker || '').includes('@') ? String(w.worker).split('@') : [w.worker, w.payoutAddress];
       const soort = w.entry === 'rented' ? ' (huur)' : '';
-      return { naam: (naam || '-') + soort, adres: shortAddr(adres || w.payoutAddress), vol: w.payoutAddress || adres, hashrate: w.hashrate || 0, besteShare: w.bestShareDiff ?? null, laatsteShare: w.lastShareAt || null };
+      // pep: true/false zodra de stratum per worker pepPayoutAddress meldt; tot dan onbekend (undefined).
+      const pep = 'pepPayoutAddress' in w ? Boolean(w.pepPayoutAddress) : undefined;
+      return { naam: (naam || '-') + soort, adres: shortAddr(adres || w.payoutAddress), vol: w.payoutAddress || adres, hashrate: w.hashrate || 0, besteShare: w.bestShareDiff ?? null, laatsteShare: w.lastShareAt || null, pep };
     }).sort((a, b) => b.hashrate - a.hashrate);
     return {
       alle: lijst,
@@ -167,6 +171,19 @@ async function doge(p) {
       bijgewerkt: Date.now(),
       besteShare: s.bestShareDiff ?? null,
       blokken: s.blocksFound ?? 0,
+      // Pepecoin (alleen LTC+DOGE-pools die het hebben ingesteld). online = pepecoind
+      // antwoordt en PEP zit in het werk. hashrate/besteShare: alleen van miners MET
+      // een PEP-adres, en alleen als de stratum dat per worker meldt.
+      pep: s.pep ? (() => {
+        const perWorker = lijst.some((w) => w.pep !== undefined);
+        const met = lijst.filter((w) => w.pep === true);
+        return {
+          online: !s.pep.error && !s.pep.unavailableSince,
+          hoogte: s.pep.height ?? null,
+          hashrate: perWorker ? met.reduce((t, w) => t + w.hashrate, 0) : null,
+          besteShare: perWorker && met.length ? Math.max(...met.map((w) => w.besteShare || 0)) : null,
+        };
+      })() : null,
       lijst,
     };
   } finally { clearTimeout(t); }
@@ -205,9 +222,9 @@ function page(d) {
   const rows = d.pools.map((p) => {
     const color = p.status === 'actief' ? '#4ade80' : p.status === 'geen update' ? '#facc15' : '#f87171';
     const miners = p.lijst.length
-      ? p.lijst.map((w) => `<tr class="w"><td></td><td colspan="2">${esc(w.naam)} <span class="m">${esc(w.adres)}</span></td><td class="r">${fmtHr(w.hashrate)}</td><td class="m">${ago(w.laatsteShare)}</td></tr>`).join('')
+      ? p.lijst.map((w) => `<tr class="w"><td></td><td colspan="2">${esc(w.naam)}${w.pep ? ' <span class="m">+PEP</span>' : ''} <span class="m">${esc(w.adres)}</span></td><td class="r">${fmtHr(w.hashrate)}</td><td class="m">${ago(w.laatsteShare)}</td></tr>`).join('')
       : '';
-    return `<tr><td><span class="dot" style="background:${color}"></span></td><td><b>${esc(p.naam)}</b><div class="m">${esc(p.voor)}</div></td><td class="m">${esc(p.poort)}</td><td class="r"><b>${fmtHr(p.hashrate)}</b></td><td>${p.workers} worker(s)${p.fout ? `<div class="m">${esc(p.fout)}</div>` : ''}</td></tr>${miners}`;
+    return `<tr><td><span class="dot" style="background:${color}"></span></td><td><b>${esc(p.naam)}</b>${p.pep ? ` <span class="m">+ PEP ${p.pep.online ? 'aan' : 'tijdelijk uit'}</span>` : ''}<div class="m">${esc(p.voor)}</div></td><td class="m">${esc(p.poort)}</td><td class="r"><b>${fmtHr(p.hashrate)}</b></td><td>${p.workers} worker(s)${p.fout ? `<div class="m">${esc(p.fout)}</div>` : ''}</td></tr>${miners}`;
   }).join('');
   const total = (id) => d.pools.filter((p) => p.id.startsWith(id)).reduce((s, p) => s + p.hashrate, 0);
   return `<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -258,6 +275,7 @@ function publicSummary(d) {
       workers: p.workers || 0,
       besteShare: p.besteShare ?? null,
       blokken: p.blokken ?? null,
+      pep: p.pep ? { online: p.pep.online, hashrate: p.pep.hashrate, besteShare: p.pep.besteShare } : null,
     })),
   };
 }
@@ -277,6 +295,7 @@ function publicMiner(d, addr) {
         hashrate: w.hashrate || 0,
         besteShare: w.besteShare ?? null,
         laatsteShare: w.laatsteShare ?? null,
+        pep: typeof w.pep === 'boolean' ? w.pep : null,
       });
     }
   }
@@ -286,13 +305,18 @@ function publicMiner(d, addr) {
 // Simpele limiet per bezoeker: 30 verzoeken per minuut.
 const hits = new Map();
 function limited(req) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  // Achter de proxy is het LAATSTE x-forwarded-for-adres het echte (de proxy
+  // voegt het toe); eerdere waarden kan een bezoeker zelf meesturen.
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ip = xff.length ? xff[xff.length - 1] : String(req.socket.remoteAddress || '');
   const now = Date.now();
   const h = hits.get(ip) || { n: 0, t: now };
   if (now - h.t > 60000) { h.n = 0; h.t = now; }
   h.n++;
   hits.set(ip, h);
-  if (hits.size > 5000) hits.clear();
+  if (hits.size > 5000) {
+    for (const [k, v] of hits) if (now - v.t > 60000) hits.delete(k);
+  }
   return h.n > 30;
 }
 
@@ -303,13 +327,21 @@ function send(res, code, body, extra = {}) {
 
 http.createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, 'http://x');
-    if (url.pathname.startsWith('/public/')) {
+    // Beslis op de RUWE url, vóór normalisatie: new URL() maakt van
+    // /public/%2e%2e/api gewoon /api, en dan kwam een publiek verzoek via de
+    // VPS bij de interne pagina uit. Publiek = alles wat met /public begint of
+    // via de proxy binnenkomt; daar bestaan alleen summary en miner/<adres>.
+    const raw = String(req.url || '/');
+    const viaProxy = Boolean(req.headers['x-forwarded-for'] || req.headers['x-forwarded-host']);
+    if (/\.\.|%2e|%2f|%5c|\\/i.test(raw)) return send(res, 400, { fout: 'ongeldig pad' });
+    const url = new URL(raw, 'http://x');
+    if (raw.startsWith('/public/') || viaProxy) {
+      if (!url.pathname.startsWith('/public/')) return send(res, 404, { fout: 'onbekend' });
       if (req.method === 'OPTIONS') return send(res, 204, {});
       if (limited(req)) return send(res, 429, { fout: 'te veel verzoeken' });
       const d = await cached();
       if (url.pathname === '/public/summary') return send(res, 200, publicSummary(d));
-      const m = /^\/public\/miner\/([A-Za-z0-9:]{20,100})$/.exec(url.pathname);
+      const m = /^\/public\/miner\/([A-Za-z0-9:]{20,100})$/.exec(decodeURIComponent(url.pathname));
       if (m) return send(res, 200, publicMiner(d, m[1]));
       return send(res, 404, { fout: 'onbekend' });
     }
