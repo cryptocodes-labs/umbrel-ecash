@@ -10,10 +10,18 @@ PRIV=$(sudo docker ps --format '{{.Names}}' | grep -i doge | grep -iv public | g
 PRIVNET=$(sudo docker inspect "$PRIV" -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | awk '{print $1}')
 echo "netwerk publiek: $NET   prive container: ${PRIV:-niet gevonden} ($PRIVNET)"
 
+# Pepecoin-netwerkcijfers (alleen lezen): dezelfde RPC-gegevens als de pools, uit de
+# .env van de privépool, in een eigen bestand (600) zodat niets op het scherm komt.
+PEPENV="$DIR/pep.env"
+grep -E '^PEP_RPC_(HOST|PORT|USER|PASSWORD)=' "$HOME/umbrel/app-data/doge-dogecoin-solo/.env" > "$PEPENV" || true
+chmod 600 "$PEPENV"
+echo "Pepecoin-gegevens: $(grep -c . "$PEPENV") van 4 regels"
+
 sudo docker rm -f pool-overzicht >/dev/null 2>&1 || true
 sudo docker run -d --name pool-overzicht --restart unless-stopped \
   --network "$NET" -p 22570:3000 --user 0 \
   -e DOGE_PRIVATE_URL="http://$PRIV:3000/api/status" \
+  --env-file "$PEPENV" \
   -v "$DIR/server.js":/app/overzicht.js:ro \
   -v "$HOME/umbrel/app-data/bassin/data":/src/bassin:ro \
   -v "$HOME/btc-rental/logs":/src/btc-rental:ro \

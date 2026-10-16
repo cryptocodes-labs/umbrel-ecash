@@ -160,7 +160,9 @@ async function doge(p) {
       const soort = w.entry === 'rented' ? ' (huur)' : '';
       // pep: true/false zodra de stratum per worker pepPayoutAddress meldt; tot dan onbekend (undefined).
       const pep = 'pepPayoutAddress' in w ? Boolean(w.pepPayoutAddress) : undefined;
-      return { naam: (naam || '-') + soort, adres: shortAddr(adres || w.payoutAddress), vol: w.payoutAddress || adres, hashrate: w.hashrate || 0, besteShare: w.bestShareDiff ?? null, laatsteShare: w.lastShareAt || null, pep };
+      return { naam: (naam || '-') + soort, adres: shortAddr(adres || w.payoutAddress), vol: w.payoutAddress || adres, hashrate: w.hashrate || 0, besteShare: w.bestShareDiff ?? null, laatsteShare: w.lastShareAt || null, pep,
+        // Alleen intern, om te kunnen zoeken op elk eigen adres (stratum 1.8.1+); gaan nooit naar buiten.
+        ltcVol: w.ltcPayoutAddress || null, pepVol: w.pepPayoutAddress || null };
     }).sort((a, b) => b.hashrate - a.hashrate);
     return {
       alle: lijst,
@@ -189,6 +191,38 @@ async function doge(p) {
   } finally { clearTimeout(t); }
 }
 
+// Pepecoin-netwerk (alleen lezen): moeilijkheid en hashrate over ~1 dag.
+const PEP_RPC = process.env.PEP_RPC_HOST && process.env.PEP_RPC_PASSWORD
+  ? { url: `http://${process.env.PEP_RPC_HOST}:${process.env.PEP_RPC_PORT || 33873}/`,
+      auth: 'Basic ' + Buffer.from(`${process.env.PEP_RPC_USER || 'umbrel'}:${process.env.PEP_RPC_PASSWORD}`).toString('base64') }
+  : null;
+let pepNet = { netwerkDiff: null, netwerkHashrate: null };
+let pepNetAt = 0;
+async function pepRpc(method, params = []) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const r = await fetch(PEP_RPC.url, { method: 'POST', signal: ctl.signal,
+      headers: { 'content-type': 'text/plain', authorization: PEP_RPC.auth },
+      body: JSON.stringify({ jsonrpc: '1.0', id: 'overzicht', method, params }) });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || 'rpc-fout');
+    return j.result;
+  } finally { clearTimeout(t); }
+}
+async function pepNetwerk() {
+  if (!PEP_RPC) return pepNet;
+  if (Date.now() - pepNetAt < 5 * 60 * 1000) return pepNet;
+  pepNetAt = Date.now();
+  try {
+    const [diff, hps] = await Promise.all([pepRpc('getdifficulty'), pepRpc('getnetworkhashps', [1440])]);
+    pepNet = { netwerkDiff: Number(diff) || null, netwerkHashrate: Number(hps) || null };
+  } catch (_) {
+    pepNet = { netwerkDiff: null, netwerkHashrate: null };
+  }
+  return pepNet;
+}
+
 async function collect() {
   const now = Date.now();
   const out = [];
@@ -202,6 +236,8 @@ async function collect() {
       out.push({ ...base, status: 'onbereikbaar', fout: err.message, hashrate: 0, workers: 0, lijst: [] });
     }
   }
+  const net = await pepNetwerk();
+  for (const p of out) if (p.pep) Object.assign(p.pep, net);
   return { tijd: now, pools: out };
 }
 
@@ -275,7 +311,8 @@ function publicSummary(d) {
       workers: p.workers || 0,
       besteShare: p.besteShare ?? null,
       blokken: p.blokken ?? null,
-      pep: p.pep ? { online: p.pep.online, hashrate: p.pep.hashrate, besteShare: p.pep.besteShare } : null,
+      pep: p.pep ? { online: p.pep.online, hashrate: p.pep.hashrate, besteShare: p.pep.besteShare,
+        hoogte: p.pep.hoogte ?? null, netwerkDiff: p.pep.netwerkDiff ?? null, netwerkHashrate: p.pep.netwerkHashrate ?? null } : null,
     })),
   };
 }
@@ -286,7 +323,8 @@ function publicMiner(d, addr) {
   for (const p of d.pools) {
     if (!PUBLIC_IDS.includes(p.id)) continue;
     for (const w of p.alle || []) {
-      if (norm(w.vol) !== n) continue;
+      // Zoeken op het DOGE-, LTC- of PEP-adres van de worker (BTC/BCH: het ene uitbetaaladres).
+      if (![w.vol, w.ltcVol, w.pepVol].some((a) => a && norm(a) === n)) continue;
       workers.push({
         pool: p.id,
         chain: CHAIN_OF[p.id],
