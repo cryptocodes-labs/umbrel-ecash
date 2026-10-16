@@ -27,14 +27,15 @@ Toegang: VPS `ssh -i ~/.ssh/id_ed25519_vps ubuntu@57.131.149.173` (Tailscale `po
 
 ## ⚠️ Updates — dit gaat fout als je het vergeet
 
-Een update van **Bassin** of **LoneStrike** in de Umbrel App Store zet `docker-compose.yml` terug:
+Een update van **Bassin**, **LoneStrike** of **Bitcoin Cash Node** in de Umbrel App Store zet `docker-compose.yml` terug:
 - Bassin draait dan weer de officiële image, maar `donation: 1.0` blijft in de config staan → **1% gaat naar de ckpool-ontwikkelaar in plaats van naar ons.**
 - LoneStrike draait dan weer met `pool_fee: 0.0` → geen fee.
+- Bitcoin Cash Node krijgt weer `-txindex=1` en verliest `-prune` → de BCH-node **start niet** ("-reindex to go back to unpruned mode") en LoneStrike en bch-rental staan stil. De bewaking meldt dan dat de BCH-node niet reageert.
 
-**Na élke update van Bassin of LoneStrike:** log in op de Umbrel en draai `~/fees-herstellen.sh`. Dat zet beide terug, herstart en toont de controle (BTC `1.0 percent donation to bc1qtr0j…`, BCH en BCH rental `"pool_fee": 1.0`).
+**Na élke update van Bassin, LoneStrike of Bitcoin Cash Node:** log in op de Umbrel en draai `~/fees-herstellen.sh`. Dat zet alle drie terug, herstart en toont de controle (BTC `1.0 percent donation to bc1qtr0j…`, BCH en BCH rental `"pool_fee": 1.0`, `BCH-node: -prune=10000`). Het BCH-deel staat in `~/bch-prune-herstellen.sh` (kopie in `scripts/` in deze repo).
 - Meldt het script "LET OP: update gebruikt docker-ckpool-solo:vX": de officiële ckpool is naar een nieuwe versie gegaan. Het script zet onze v1.1.1 terug; bouw daarna een nieuwe versie (in `~/ckpool-fee/Dockerfile` de `git checkout`-tag aanpassen, opnieuw bouwen met `--build-arg FEE_ADDR=bc1qtr0j4w275ndkyrh5396rzdvmtakqymcp046cht`, controleren dat de build faalt als het oude adres niet gevonden wordt) en herstart `bassin` én `btc-rental`.
 - `btc-rental` en `bch-rental` zijn losse containers (`--restart unless-stopped`), niet uit de App Store. Die worden nooit automatisch bijgewerkt en een app-update raakt ze niet.
-- **Nooit "Alles bijwerken"** in de Umbrel als Bassin of LoneStrike in de lijst staan: werk die apart bij en draai daarna `~/fees-herstellen.sh`. De AI-agent (Claude Code via Umbrel MCP) werkt Bassin en LoneStrike nooit bij.
+- **Nooit "Alles bijwerken"** in de Umbrel als Bassin, LoneStrike of Bitcoin Cash Node in de lijst staan: werk die apart bij en draai daarna `~/fees-herstellen.sh`. De AI-agent (Claude Code via Umbrel MCP) werkt Bassin en LoneStrike nooit bij.
 
 ## Overig
 
@@ -71,6 +72,9 @@ Een update van **Bassin** of **LoneStrike** in de Umbrel App Store zet `docker-c
 - **DBCACHE=450** op de DOGE- en LTC-node, via Umbrel-instellingen (eigen omgevingsvariabele, blijft bij updates). Scheelt weinig RAM: het geheugen van die nodes zit vooral in de blokindex.
 - **BTC-node**: Bitcoin Core v31.1.0. **16 okt 16:24 (NL) segfault** in een RPC-thread; de Umbrel Bitcoin-app start bitcoind dan bewust niet opnieuw ("TODO … auto-restart", manager.ts) en blijft "ready" tonen. Bassin en btc-rental zaten 30 min zonder node, weigerden 1…/3…-adressen en hun `ckpool.log` groeide 5 MB/s. Opgelost met een herstart; nu bewaakt (zie hieronder). Enige crash sinds 3 okt, geen hardwarefouten.
 - **BCH-node**: officiële Umbrel-app, BCHN v29.0.0; v29.2.0 is "strongly encouraged" — wachten op een update van de Umbrel-app.
+- **BCH-node gesnoeid (16 okt 19:01 NL)**: van 275 GB naar 15 GB. In de `docker-compose.yml` van de app `-txindex=1` → `-txindex=0` plus `-prune=10000` (10 GB blokken, nu terug tot hoogte 882.966). Niet via `bitcoin.conf`: die herschrijft het BCH-dashboard volledig (Tor-instellingen), en `-txindex=1` op de opdrachtregel botst met prune (BCHN `init.cpp`: "Prune mode is incompatible with -txindex"). De dashboards van LoneStrike en BCHN vragen transacties op mét blokhash, dat werkt zonder txindex. De oude index (21 GB) staat in de Umbrel-prullenbak. Terug naar een volledige node = 232 GB opnieuw downloaden.
+- **ckpool-geheugen**: de ckpool van Bassin en van btc-rental gebruikten na 13 dagen elk 2,4 GB (met 3 resp. 0 workers). Op 16 okt 18:34 NL herstart (`sudo docker restart bassin_ckpool_1 btc-rental`; fee zit in image + `ckpool.conf` en bleef 1,0) → 50 MB elk. Groeit het weer, dan is het een lek in ckpool.
+- **eCash Solo Mining-app** op 16 okt 18:06 NL verwijderd via het Umbrel-scherm (166 GB vrij).
 - De ckpool-logboeken van Bassin en btc-rental zijn op 16 okt leeggemaakt (samen 18,8 GB spam); nuttige regels staan in `ckpool-tot-2026-10-16.log` ernaast.
 - In de Umbrel zit een ongebruikte interne NVMe van 512 GB (`nvme0n1`, geen partities).
 
@@ -91,7 +95,7 @@ Een update van **Bassin** of **LoneStrike** in de Umbrel App Store zet `docker-c
 
 ## Back-up
 
-- Umbrel-back-up (Instellingen → Back-ups) naar de DigiEra 1 TB (USB aan de Umbrel), elk uur, versleuteld; wachtwoord in de wachtwoordbeheerder. eCash Solo Mining uitgesloten (179 GB); de blockchains sluiten de node-apps zelf uit, dus de back-up is ±1 GB.
+- Umbrel-back-up (Instellingen → Back-ups) naar de DigiEra 1 TB (USB aan de Umbrel, exFAT), map `umbrel-backup`, elk uur, versleuteld; wachtwoord in de wachtwoordbeheerder. Eerste back-up 16 okt 18:52 NL: 184 MB, de node-apps sluiten hun blockchains zelf uit. Kies bij het instellen nooit de map `.Spotlight-V100`: die is van macOS. Een eerdere poging (52,7 GB) staat in `DIGIERA/OUD-back-up-mag-weg` en mag weg.
 - Wat buiten de apps staat (losse containers, scripts, fee-aanpassingen) zit niet vanzelf in de back-up. Er staat een kopie in Umbrel-bestanden **Home → Handwerk-backup**; na elke wijziging opnieuw kopiëren.
 
 ## Toegang
